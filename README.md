@@ -1,148 +1,168 @@
 # Draw Things-to-ComfyUI PNG Metadata Converter
 **A handy little Python script that will take a directory full of PNGs exported from DrawThings, and convert their metadata so that the same PNGs can also be used in ComfyUI.**
 
-**Version 1.00** · Python 3.9+ · Windows 10/11, macOS · Standard library only · No custom ComfyUI nodes
+**Version 1.01** · Python 3.9+ · Windows 10/11 and macOS · Standard library only · Works with vanilla ComfyUI
 
-Convert **existing Draw Things PNGs** into images that can be dragged directly onto a **vanilla ComfyUI** canvas to load a connected, best-effort workflow.
+Convert existing PNGs exported from [Draw Things](https://drawthings.ai/) into images that also contain native [ComfyUI](https://github.com/comfyanonymous/ComfyUI) `workflow` and `prompt` metadata. Drag a converted PNG into ComfyUI to inspect a reconstructed, best-effort workflow **without losing the original Draw Things generation metadata or image data**.
 
-The converter adds ComfyUI `workflow` and `prompt` JSON to the PNG, preserving the image's original Draw Things XMP and compressed pixel data. It does **not** generate new images, install models, or modify Draw Things projects.
+The converter is a **standalone script**: it reads individual PNG files or folders of PNGs. It **does not** read SQLite databases, regenerate images, or convert model weights. It accepts **any model filename**; identification is used to improve the workflow, not to determine whether an image may be processed.
 
-> **Release note:** v1.00 freezes the tested **Alpha 13 (A13)** functionality. The release updates version identification and documentation, not workflow behavior.
+## Requirements
+
+- **Python 3.9 or later** on Windows 10/11 or macOS (including macOS 26/27). No `pip install` or additional Python packages are required.
+- PNGs exported from Draw Things that contain readable Draw Things generation JSON in XMP `exif:UserComment`.
+- ComfyUI is **not needed to run the converter**. A vanilla ComfyUI installation is sufficient to inspect supported generated nodes; actually executing a workflow can require additional models or compatible node types.
+- Free disk space for staging, rollback, and optional backups. Images are processed one at a time.
+
+Download [`convert_metadata_drawthings_to_comfyui.py`](convert_metadata_drawthings_to_comfyui.py). Run the commands below from a directory containing the script, or supply its full path.
 
 ## Quick start
 
-Download **[`convert_metadata_drawthings_to_comfyui.py`](convert_metadata_drawthings_to_comfyui.py)**. No installation or `pip install` is necessary beyond Python 3.9+.
+Try a **copy** of a few PNGs before processing an important image collection.
 
-**Windows 10/11 — Command Prompt or PowerShell**
+**Windows — Command Prompt or PowerShell:**
 
 ```cmd
 py convert_metadata_drawthings_to_comfyui.py . --dry-run --verbose
-py convert_metadata_drawthings_to_comfyui.py . --backup --verify
+py convert_metadata_drawthings_to_comfyui.py . --backup --verify --report conversion.csv
 ```
 
-**macOS**
+**macOS — Terminal:**
 
 ```bash
 python3 convert_metadata_drawthings_to_comfyui.py . --dry-run --verbose
-python3 convert_metadata_drawthings_to_comfyui.py . --backup --verify
+python3 convert_metadata_drawthings_to_comfyui.py . --backup --verify --report conversion.csv
 ```
 
-`.` means the current directory; you can instead supply a folder path or one `.png` file. Subdirectories are excluded unless you specify `--recursive`.
+`.` processes PNGs in the current directory. Supply a specific file or directory path instead; names with spaces must be quoted. Subdirectories are scanned **only** with `--recursive` (`-r`).
 
-### Recommended optional features
+```bash
+# One image
+python3 convert_metadata_drawthings_to_comfyui.py photo.png --backup --verify
 
-```cmd
-py convert_metadata_drawthings_to_comfyui.py . --ckpt-to-safetensors --short-filenames --backup --verify
+# Folder with a space in its name
+python3 convert_metadata_drawthings_to_comfyui.py "DrawThings iPhone created 2026.04.07" --backup --verify
+
+# Include subfolders
+python3 convert_metadata_drawthings_to_comfyui.py ./images --recursive --backup --verify
+
+# Replace existing ComfyUI metadata using the original Draw Things metadata
+python3 convert_metadata_drawthings_to_comfyui.py ./images --overwrite --backup --verify
+
+# Do not contact Civitai
+python3 convert_metadata_drawthings_to_comfyui.py ./images --no-civitai --backup --verify
 ```
 
-- **`--ckpt-to-safetensors`** adjusts known Draw Things **model filename references** for the file formats commonly used in ComfyUI. Checkpoints and LoRAs generally map to `.safetensors`; recognized upscaler, restoration, and conditioning-model references use category-specific conventions such as `.pth`. This is one flag for supported categories; it doesn't convert the model files themselves.
-- **`--short-filenames`** optionally renames images using their *filesystem creation timestamps*, ignoring Draw Things' long prompt-derived filenames.
-- **`--backup --verify`** keeps a copy of the source file and verifies the metadata and image-data invariants.
+## Optional image renaming: `--rename-images`
 
-Use `--dry-run` first if you want to preview the changes.
-
-## Optional short filename format
+Draw Things can export PNGs with long, prompt-derived filenames. Use **`--rename-images`** to rename them using the same timestamp-based style as ComfyThings:
 
 ```text
 DrawThings_YYYYMMDD_HHMMSS_ffffff.png
 ```
 
-Example: `DrawThings_20261016_202203_934009.png`
+Example: `DrawThings_20260407_143012_456789.png`.
 
-The date and 24-hour time come **only from filesystem Date Created**, including **six fractional-second digits (microseconds)**. The converter never substitutes Date Modified. It intentionally ignores any leading export index, trailing seed, or fingerprint in the original filename.
+The date and time come from the PNG file's **filesystem Date Created**, including its six-digit **microsecond** component—not from the prompt, seed, a hash, or Date Modified. The file creation timestamp may reflect the time of manual export or copying rather than the actual generation time. A suffix of `_000000` is **valid** when the available creation timestamp has zero microseconds; the converter never invents fractional seconds.
 
-If two images share the same creation timestamp to the microsecond, the additional images get `_1`, `_2`, `_3`, and so forth. No existing destination file is overwritten. Filenames already matching this convention remain unchanged on subsequent runs; earlier A11/A12 shortened filenames can be renamed again without rebuilding ComfyUI metadata.
+With `--rename-images`:
 
-**Note:** File creation timestamps may reflect when Draw Things exported or a tool copied the PNG, not the original generation time. On Linux, the optional shortening operation requires accessible filesystem birth time. On Windows and macOS, the native creation/birth timestamp is used.
+- **First-time conversion:** Add ComfyUI metadata, then rename the PNG.
+- **Already-converted PNG:** Skip metadata conversion, but rename it if necessary. The PNG bytes and existing workflow are not rewritten.
+- **Existing timestamp-style filename:** Recompute the expected name from the actual Date Created, **including microseconds**, and rename if any component differs—even if the filename already looks correct.
+- **Identical timestamps:** Add `_1`, `_2`, and so on to prevent overwrites (for example, `DrawThings_20260407_143012_000000_1.png`).
+- **Already correct:** Leave the filename unchanged. The option is opt-in; without it, original names are kept.
 
-## Filename reference normalization
+**Preview filename changes and write a CSV report without changing PNGs:**
 
-The optional `--ckpt-to-safetensors` flag changes **generated ComfyUI references only**—not the source Draw Things XMP or any actual model files.
-
-| Recorded Draw Things filename | Output reference |
-| --- | --- |
-| `biglove_photo1_f16.ckpt` (checkpoint) | `biglove_photo1.safetensors` |
-| `coolthing_lora_f16.ckpt` (LoRA) | `coolthing.safetensors` |
-| `biglove_zt3_f16.ckpt` (refiner) | `biglove_zt3.safetensors` |
-| `realesrgan_x2plus_f16.ckpt` (upscaler) | `realesrgan_x2plus.pth` |
-| `restoreformer_v1.0_f16.ckpt` (face restoration) | `restoreformer_v1.0.pth` |
-| `control_v11p_sd15_canny_f16.ckpt` (ControlNet) | `control_v11p_sd15_canny.pth` |
-
-Known suffix transformations are practical naming conventions, **not guaranteed recovery of the originally downloaded filename**. Some names may require manual correction in ComfyUI. Unrecognized upscaler/restoration references are left unchanged rather than assigned an invented extension. Filenames in informational Notes are normalized when recognized, even when that processing stage is not reconstructed as functional nodes.
-
-## What gets reconstructed?
-
-The output PNG includes a connected workflow with **standard ComfyUI nodes** where the source data makes reconstruction defensible. Depending on the image, this may cover:
-
-- Checkpoint, supported LoRAs, prompts, seed, steps, CFG, supported sampler/scheduler, and generation resolution.
-- CLIP skip and tiled VAE decoding where supported.
-- **Conditional two-pass Hires Fix** when configuration **and recorded processing events** support it: first-pass sampling → VAE decode → bilinear resize → VAE encode → second sampling → final decode/save.
-- Native **Note nodes** in compact left-side columns for recorded settings that cannot be accurately represented as executable processing.
-
-Original LoRA weights are used as recorded. Draw Things LoRA modes (`all`, `base`, `refiner`) describe **generation stages**, not independently adjustable model-versus-CLIP weights. A refiner-only LoRA is not incorrectly added to the base-stage graph.
-
-Untranslated settings remain in the original XMP and, where meaningful, Notes. This includes genuinely different refiners, advanced guidance and model-specific behavior, external upscaling, and face restoration. The approved `normal` scheduler fallback is used when appropriate. **ComfyUI output is a best-effort translation, not a guarantee of identical regenerated pixels.**
-
-For the second Hires Fix pass, the recorded seed is reused because the original second-pass RNG state isn't embedded; `stage2Steps` is **not** assumed to be the Hires Fix steps value.
-
-## Data preservation and safety
-
-- **PNG IDAT data is preserved**: source image data is not decoded and re-encoded.
-- Existing Draw Things XMP is **retained**, including the original model filenames and weights.
-- The source file is updated **in place**; optional renaming preserves its filesystem identity.
-- On Windows, **Date Created, Date Modified, and Date Accessed** are captured, restored, and checked. On macOS, modification/access times are restored and birth time is retained through the same file object.
-- `--backup` creates numbered backups such as `.bak1.png` without replacing older backups.
-- `--verify` checks preserved image data, original XMP, and generated metadata after writing.
-- Symlinks and numbered backup files are skipped during scans; other file types are ignored.
-
-For large or irreplaceable image collections, test on copies first. Use `--backup --verify` for important runs.
-
-## Existing conversions and classification
-
-Running the script again on a PNG with ComfyUI metadata normally skips conversion. To **rebuild its ComfyUI workflow from the preserved Draw Things metadata**, use `--overwrite`:
-
-```cmd
-py convert_metadata_drawthings_to_comfyui.py . --overwrite --ckpt-to-safetensors --backup --verify
+```bash
+python3 convert_metadata_drawthings_to_comfyui.py "DrawThings iPhone created 2026.04.07" --rename-images --dry-run --verbose --report rename_preview.csv
 ```
 
-`--short-filenames` can rename an already-converted image **without** `--overwrite` and without rewriting its workflow.
+The CSV has `file`, `status`, `message`, and `warnings` columns. The `message` indicates proposed names (for example, `would rename only; rename to DrawThings_...png`) or first-time conversions (`would convert; rename to ...`). **The report is written even in dry-run mode; the images are not changed.**
 
-| Classification | Meaning |
+**Apply conversion and/or renaming:**
+
+```bash
+python3 convert_metadata_drawthings_to_comfyui.py "DrawThings iPhone created 2026.04.07" --rename-images --backup --verify --report conversion.csv
+```
+
+Do **not** specify `--overwrite` when you only want to rename previously converted PNGs. On Windows and macOS, the renamer uses the filesystem creation timestamp; on Linux, rename support requires an available filesystem birth timestamp and does not substitute Date Modified.
+
+## Command-line options
+
+| Option | Behavior |
 | --- | --- |
-| **FULL** | Enough metadata for a best-effort functional ComfyUI graph |
-| **PARTIAL** | Recognizable Draw Things data exists, but a functional graph cannot be built safely; output has informational Notes only |
-| **NONE** | Draw Things metadata absent; leave the PNG unchanged |
-| **ERROR** | Invalid PNG, permissions, or other processing failure |
+| `path` | One PNG or a directory; defaults to `.`. |
+| `--recursive`, `-r` | Process PNGs in subdirectories. |
+| `--backup` | Keep numbered backup files (`.bak1.png`, `.bak2.png`, etc.). |
+| `--dry-run` | Preview operations without changing PNG files. |
+| `--overwrite` | Recreate `workflow` and `prompt` metadata in previously converted PNGs. |
+| **`--rename-images`** | Rename PNGs using filesystem Date Created, including microseconds; works for new and existing conversions. |
+| `--verify` | Validate output PNG, original image data and XMP, and generated ComfyUI metadata. |
+| `--report FILE.csv` | Save per-file statuses, messages, and warnings, including proposed renames during dry-run. |
+| `--verbose` | Display per-file outcomes and warnings. |
+| `--quiet` | Suppress routine console output. |
+| `--no-progress` | Disable progress-bar display. |
+| `--no-civitai` | Disable online model identification; use the embedded catalog and offline fallbacks. |
+| `--version` | Display the script version. |
+| `--help` | Display all command-line options. |
 
-### Command-line options
+Options can be combined. Renaming is never enabled by default. The script reports per-file failures and exits with a nonzero status when errors occur. Non-PNG files and numbered backup PNGs are ignored during directory scans; PNGs without Draw Things generation metadata are skipped.
 
-| Argument | Purpose |
-| --- | --- |
-| `path` | One `.png` or directory; defaults to `.` |
-| `--recursive`, `-r` | Scan subdirectories |
-| `--backup` | Keep numbered copies of pre-conversion files |
-| `--dry-run` | Preview without modifying PNGs |
-| `--overwrite` | Rebuild existing ComfyUI metadata |
-| `--ckpt-to-safetensors` | Normalize supported model reference filenames |
-| `--short-filenames` | Use Date Created and microseconds for filenames |
-| `--verify` | Verify output and preserved content |
-| `--report results.csv` | Create per-file CSV status report |
-| `--verbose`, `-v` | Show per-file details |
-| `--quiet` | Suppress ordinary output |
-| `--no-progress` | Suppress progress bar |
-| `--version` / `--help` | Show version or help |
+## What the conversion preserves and reconstructs
 
-`--report` may write a CSV even during `--dry-run`; it does not change image files.
+The converter reads Draw Things generation JSON from the PNG's existing XMP data and adds **ComfyUI `workflow` and `prompt` JSON**. Where there is enough information, it reconstructs a connected graph using standard ComfyUI nodes. Depending on the model and the available metadata, the graph can represent:
 
-## Supported input and limitations
+- Positive and negative prompts, seed, steps, guidance, dimensions, sampler/scheduler, and checkpoint filename.
+- Supported LoRAs and their stage/weight semantics, CLIP-related information, and VAE decoding options (including tiled decoding where appropriate).
+- Architecture-dependent text encoders, model sampling and guidance, plus recognizable Hires Fix, upscaling, or other processing stages when the available metadata justifies them.
+- A visible **ComfyUI Note** containing the original generation information, the **complete original Draw Things JSON**, model-family identification, and any uncertainty or approximations.
 
-- **Input:** Draw Things-generated `.png` files with embedded XMP `exif:UserComment` JSON. A1111 metadata and JPG conversion are not supported by this script.
-- **Output:** PNGs with vanilla ComfyUI `workflow` and `prompt` metadata.
-- **Not included:** Draw Things `.sqlite3` project parsing, generation history recovery, model file conversion, automatic model installation, or reconstruction of unsupported operations.
-- **Platform:** Python 3.9+ on Windows 10/11 and macOS; Linux works for ordinary conversion, with filesystem birth-time availability required for `--short-filenames`.
+Model identification first checks an embedded catalog of exact Draw Things model filenames. When a confident identification is unavailable, the script can query **Civitai** for corroborating model/version/file information. The model filename is used in that request; **images, prompts, and full generation metadata are not uploaded**. Civitai may be unavailable or return no reliable match. Use `--no-civitai` for offline operation. Unknown model families still receive best-effort conversion.
 
-For full details, examples, and operational cautions, read [`convert_metadata_drawthings_to_comfyui_README.txt`](convert_metadata_drawthings_to_comfyui_README.txt).
+**This is a metadata converter, not a reproduction engine.** Some samplers, schedules (such as Trailing), refiners, advanced conditioning, and architecture-specific behavior cannot be represented exactly by vanilla ComfyUI. These distinctions are explained in the Note rather than silently asserted as equivalent. A connected graph does not guarantee it can execute without compatible model files or manually corrected node parameters. The script does not install models or automatically make incompatible model formats runnable.
+
+## Image integrity and file safety
+
+- **Original Draw Things XMP is preserved**, including original model identifiers and generation settings.
+- **Original PNG compressed image (`IDAT`) bytes are preserved.** Images are not decoded or recompressed.
+- Files are modified **in place**, not replaced with a newly created image. Rename-only operations do not change any PNG bytes.
+- On **Windows**, native creation, modification, and access timestamps are captured, restored, and checked. On **macOS**, modification and access times are restored and the original file object (and its creation/birth date) is retained.
+- A staged image and rollback copy protect against ordinary write errors. `--backup` keeps persistent numbered backups; an already existing backup is not overwritten.
+- PNG chunk CRCs and embedded workflow structure are checked during processing; `--verify` also checks the written image's preservation invariants.
+- Existing ComfyUI metadata is skipped unless `--overwrite` is specified. With `--rename-images`, already converted PNGs can instead be renamed without rebuilding their workflows.
+
+**In-place writes are not power-loss atomic.** For valuable collections, first try a small copied directory, then use `--backup --verify` and retain a separate backup of the originals.
+
+## Limitations and troubleshooting
+
+**A workflow opens but won't execute.** The referenced checkpoint, LoRAs, text encoders, VAEs, or other model assets may not be installed or usable by vanilla ComfyUI. This does not make the original metadata invalid. Model filenames inside ComfyUI nodes may require manual adjustment to match local filenames. The converter does **not** change model weights or automatically rename `.ckpt` files to `.safetensors`.
+
+**Some settings are informational only.** An unfamiliar sampler or a source stage without a suitable ComfyUI node may require a best-effort approximation or a Note-only presentation. The untouched original XMP remains the authoritative record.
+
+**An image was skipped.** It may already contain `workflow`/`prompt` metadata, or may lack readable Draw Things generation JSON in XMP. Use `--verbose` or `--report` to identify the reason. Use `--overwrite` only when you explicitly want to rebuild a previously converted workflow.
+
+**`--rename-images` leaves `_000000` intact.** If Date Created actually has zero microseconds, the name is correct. It is not a fingerprint and does not need a nonzero value.
+
+**Renaming failed.** The filesystem must provide an accessible creation/birth timestamp. Renaming never overwrites an occupied destination name. Check file permissions and destination collisions; when possible, move files to a filesystem that preserves their original creation dates.
+
+**Conversion is slow.** PNGs are scanned and copied sequentially, and Civitai lookups can add latency when model names are not cached. Use `--no-civitai` if you prefer predictable offline runs.
+
+## Changes from v1.00 → v1.01
+
+- **Architecture-aware workflow reconstruction:** Added more accurate ComfyUI workflow generation for recognized model architectures, including SDXL, FLUX, Z-Image, and Qwen Image variants.
+- **Expanded model identification:** Added an embedded Draw Things model catalog to identify model families using their original filenames.
+- **Civitai integration:** Added online model identification for models not recognized by the embedded catalog.
+- **Offline operation:** Added `--no-civitai` to disable online model lookups.
+- **Improved handling of unknown models:** Unrecognized models continue to receive best-effort ComfyUI metadata rather than being rejected.
+- **Comprehensive metadata Notes:** Added the complete original Draw Things generation JSON, model identification, generation settings, and conversion warnings directly into the ComfyUI workflow.
+- **Improved sampler handling:** Unrecognized samplers no longer automatically cause conversion failure. The original sampler is documented, and an explicitly identified approximation is used where appropriate.
+- **Architecture-specific metadata:** Improved handling of text encoders, VAE dependencies, LoRAs, model shifts, and guidance settings.
+- **Advanced generation stages:** Expanded reconstruction of Hires Fix, upscaling, and other multi-stage operations when sufficient metadata is available.
+- **Improved workflow layout:** Better node positioning, clearer informational Notes, and consistent placement of output nodes.
+- **Optional image renaming:** Added `--rename-images` to rename first-time or previously converted PNGs to the `DrawThings_YYYYMMDD_HHMMSS_ffffff.png` convention using filesystem Date Created, including microseconds, with collision protection and dry-run CSV previews.
 
 ---
 
-**v1.00** — Stable release of the user-tested A13 converter. The separate **ComfyThings (CT)** project is intended to explore direct Draw Things project-database exports; it is not part of this converter.
+**Release 1.01** — standalone metadata conversion of existing Draw Things PNGs; no project-database access required.
