@@ -1,17 +1,14 @@
+<img src="images/DrawThings-to-ComfyUI_PNG_Metadata_Converter_banner_1672x308.png" alt="DrawThings-to-ComfyUI_PNG_Metadata_Converter_banner_1672x308.png">
+
 # Draw Things-to-ComfyUI PNG Metadata Converter
 **A handy little Python script that will take a directory full of PNGs exported from DrawThings, and convert their metadata so that the same PNGs can also be used in ComfyUI.**
-
-
-
-**Note:**
-If you want to export all your images and videos from a DrawThings project, use [ComfyThings](https://github.com/SunGod/ComfyThings) instead. 
-
-
-**Version 1.01** · Python 3.9+ · Windows 10/11 and macOS
 
 Convert existing PNGs exported from [Draw Things](https://drawthings.ai/) into images that also contain native [ComfyUI](https://github.com/comfyanonymous/ComfyUI) `workflow` and `prompt` metadata. Drag a converted PNG into ComfyUI to inspect a reconstructed, best-effort workflow **without losing the original Draw Things generation metadata or image data**.
 
 The converter is a **standalone script**: it reads individual PNG files or folders of PNGs. It **does not** read SQLite databases, regenerate images, or convert model weights. It accepts **any model filename**; identification is used to improve the workflow, not to determine whether an image may be processed.
+
+**Note:**
+If you want to export all your images and videos from a DrawThings project, use [ComfyThings](https://github.com/SunGod/ComfyThings) instead. 
 
 ## Requirements
 
